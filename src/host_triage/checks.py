@@ -12,7 +12,7 @@ import re
 import shutil
 import socket
 import ssl
-import subprocess  # noqa: S404 - used with fixed argv, never shell=True
+import subprocess
 import sys
 import time
 import urllib.error
@@ -41,7 +41,7 @@ class CheckConfig:
 # timing helper
 # --------------------------------------------------------------------------- #
 class _Timer:
-    __slots__ = ("elapsed_ms", "_start")
+    __slots__ = ("_start", "elapsed_ms")
 
     def __enter__(self) -> _Timer:
         self._start = time.perf_counter()
@@ -61,7 +61,9 @@ def check_dns(target: Target, cfg: CheckConfig) -> CheckResult:
             infos = socket.getaddrinfo(target.host, target.port, proto=socket.IPPROTO_TCP)
         except socket.gaierror as exc:
             return CheckResult(
-                "dns", Status.FAIL, f"resolution failed: {exc.strerror or exc}",
+                "dns",
+                Status.FAIL,
+                f"resolution failed: {exc.strerror or exc}",
                 duration_ms=t.elapsed_ms,
             )
     addrs = _unique_addresses(infos)
@@ -93,17 +95,24 @@ def check_tcp(target: Target, cfg: CheckConfig) -> CheckResult:
                 peer = sock.getpeername()[0]
         except TimeoutError:
             return CheckResult(
-                "tcp", Status.FAIL, f"connect to {target.hostport} timed out",
+                "tcp",
+                Status.FAIL,
+                f"connect to {target.hostport} timed out",
                 duration_ms=t.elapsed_ms,
             )
         except OSError as exc:
             return CheckResult(
-                "tcp", Status.FAIL, f"connect to {target.hostport} failed: {exc.strerror or exc}",
+                "tcp",
+                Status.FAIL,
+                f"connect to {target.hostport} failed: {exc.strerror or exc}",
                 duration_ms=t.elapsed_ms,
             )
     return CheckResult(
-        "tcp", Status.OK, f"connected to {peer}:{target.port}",
-        details={"peer": peer, "port": target.port}, duration_ms=t.elapsed_ms,
+        "tcp",
+        Status.OK,
+        f"connected to {peer}:{target.port}",
+        details={"peer": peer, "port": target.port},
+        duration_ms=t.elapsed_ms,
     )
 
 
@@ -116,24 +125,35 @@ def check_tls(target: Target, cfg: CheckConfig) -> CheckResult:
     with _Timer() as t:
         ctx = ssl.create_default_context()
         try:
-            with socket.create_connection((target.host, target.port), timeout=cfg.timeout) as sock:
-                with ctx.wrap_socket(sock, server_hostname=target.host) as ssock:
-                    cert = ssock.getpeercert() or {}
+            with (
+                socket.create_connection((target.host, target.port), timeout=cfg.timeout) as sock,
+                ctx.wrap_socket(sock, server_hostname=target.host) as ssock,
+            ):
+                cert = ssock.getpeercert() or {}
         except ssl.SSLCertVerificationError as exc:
             return CheckResult(
-                "tls", Status.FAIL, f"certificate invalid: {exc.verify_message or exc.reason}",
-                details={"reason": exc.reason}, duration_ms=t.elapsed_ms,
+                "tls",
+                Status.FAIL,
+                f"certificate invalid: {exc.verify_message or exc.reason}",
+                details={"reason": exc.reason},
+                duration_ms=t.elapsed_ms,
             )
         except ssl.SSLError as exc:
             return CheckResult(
-                "tls", Status.FAIL, f"tls handshake failed: {exc.reason or exc}",
+                "tls",
+                Status.FAIL,
+                f"tls handshake failed: {exc.reason or exc}",
                 duration_ms=t.elapsed_ms,
             )
         except TimeoutError:
-            return CheckResult("tls", Status.FAIL, "tls handshake timed out", duration_ms=t.elapsed_ms)
+            return CheckResult(
+                "tls", Status.FAIL, "tls handshake timed out", duration_ms=t.elapsed_ms
+            )
         except OSError as exc:
             return CheckResult(
-                "tls", Status.FAIL, f"connection failed: {exc.strerror or exc}",
+                "tls",
+                Status.FAIL,
+                f"connection failed: {exc.strerror or exc}",
                 duration_ms=t.elapsed_ms,
             )
 
@@ -142,7 +162,9 @@ def check_tls(target: Target, cfg: CheckConfig) -> CheckResult:
         expiry = parse_cert_datetime(not_after)
     except ValueError:
         return CheckResult(
-            "tls", Status.WARN, "connected but certificate expiry could not be parsed",
+            "tls",
+            Status.WARN,
+            "connected but certificate expiry could not be parsed",
             duration_ms=t.elapsed_ms,
         )
     days_left = (expiry - datetime.now(UTC)).days
@@ -152,7 +174,9 @@ def check_tls(target: Target, cfg: CheckConfig) -> CheckResult:
     )
     summary = _tls_summary(days_left, expiry)
     return CheckResult(
-        "tls", status, summary,
+        "tls",
+        status,
+        summary,
         details={
             "days_left": days_left,
             "not_after": expiry.date().isoformat(),
@@ -225,8 +249,11 @@ def check_http(target: Target, cfg: CheckConfig) -> CheckResult:
     redirected = final != url
     summary = f"{status} {reason}" + (f" -> {final}" if redirected else "")
     return CheckResult(
-        "http", result_status, summary,
-        details={"status": status, "final_url": final}, duration_ms=t.elapsed_ms,
+        "http",
+        result_status,
+        summary,
+        details={"status": status, "final_url": final},
+        duration_ms=t.elapsed_ms,
     )
 
 
@@ -256,7 +283,9 @@ def check_ping(target: Target, cfg: CheckConfig) -> CheckResult:
     with _Timer() as t:
         try:
             proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-                argv, capture_output=True, text=True,
+                argv,
+                capture_output=True,
+                text=True,
                 timeout=cfg.timeout * cfg.ping_count + 2,
             )
         except subprocess.TimeoutExpired:
@@ -312,11 +341,16 @@ def check_trace(target: Target, cfg: CheckConfig) -> CheckResult:
                 argv, capture_output=True, text=True, timeout=cfg.trace_max_hops * 2 + 10
             )
         except subprocess.TimeoutExpired:
-            return CheckResult("trace", Status.WARN, "traceroute timed out", duration_ms=t.elapsed_ms)
+            return CheckResult(
+                "trace", Status.WARN, "traceroute timed out", duration_ms=t.elapsed_ms
+            )
     hops = count_trace_hops(proc.stdout)
     return CheckResult(
-        "trace", Status.OK, f"{hops} hop(s) to {target.host}",
-        details={"hops": hops}, duration_ms=t.elapsed_ms,
+        "trace",
+        Status.OK,
+        f"{hops} hop(s) to {target.host}",
+        details={"hops": hops},
+        duration_ms=t.elapsed_ms,
     )
 
 

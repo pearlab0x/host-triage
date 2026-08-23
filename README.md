@@ -8,9 +8,9 @@
 One command to answer *"is this host actually up, and if not, where does it break?"*
 
 `host-triage` runs the checks you'd otherwise run by hand - DNS resolution,
-ping, a TCP connect, TLS certificate expiry, and an HTTP request - against a
-single target, then prints a compact table (or JSON) and exits with a code you
-can gate on.
+ping, a TCP connect, TLS certificate expiry, and an HTTP request - against one
+or more targets (concurrently), then prints a compact table (or JSON) and exits
+with a code you can gate on.
 
 ```console
 $ host-triage api.example.com
@@ -63,6 +63,23 @@ host-triage example.com --json | jq .       # machine-readable
 host-triage example.com -t 2                 # 2-second per-check timeout
 ```
 
+### Multiple targets
+
+Pass several targets at once and they're checked in parallel:
+
+```bash
+host-triage a.example.com b.example.com api.example.com:8443
+host-triage -f hosts.txt                      # one target per line ('#' comments ok)
+cat hosts.txt | host-triage                    # or piped on stdin
+host-triage -f prod.txt -f staging.txt -j 20   # multiple files, 20 workers
+```
+
+Results are always printed in the order the targets were given, regardless of
+which finishes first, and the run exits non-zero if *any* target has a failure.
+A single unparseable target reports a failing `target` check instead of
+aborting the whole batch. Worker count is chosen automatically; override it with
+`-j/--jobs`.
+
 ### Targets
 
 Accepts `host`, `host:port`, or a full URL, including bracketed IPv6:
@@ -113,14 +130,26 @@ $ host-triage example.com -c dns,tls --json
 }
 ```
 
+For a single target the JSON is the flat object shown above. For **multiple**
+targets it's wrapped so you can gate on the batch as a whole:
+
+```json
+{
+  "ok": false,
+  "failures": 1,
+  "targets": [ { "target": "a.example.com", "ok": true,  "checks": [ ... ] },
+               { "target": "b.example.com", "ok": false, "checks": [ ... ] } ]
+}
+```
+
 ## Exit codes
 
-| Code | Meaning                          |
-| ---- | -------------------------------- |
-| `0`  | All checks clear (warnings pass) |
-| `1`  | One or more checks failed        |
-| `2`  | Usage error                      |
-| `3`  | Unexpected error                 |
+| Code | Meaning                                            |
+| ---- | -------------------------------------------------- |
+| `0`  | All checks clear on every target (warnings pass)   |
+| `1`  | One or more checks failed on one or more targets   |
+| `2`  | Usage error                                        |
+| `3`  | Unexpected error                                   |
 
 Because a warning (e.g. a cert with 9 days left) does **not** fail the run, you
 can wire it into CI and only break the build on a real outage:

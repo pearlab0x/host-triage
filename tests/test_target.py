@@ -30,7 +30,9 @@ def test_default_port_override() -> None:
     assert parse_target("example.com", default_port=80).port == 80
 
 
-@pytest.mark.parametrize("raw", ["", "   ", "example.com:0", "example.com:70000", "example.com:abc"])
+@pytest.mark.parametrize(
+    "raw", ["", "   ", "example.com:0", "example.com:70000", "example.com:abc"]
+)
 def test_parse_target_rejects_bad_input(raw: str) -> None:
     with pytest.raises(ValueError):
         parse_target(raw)

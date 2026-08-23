@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "host-triage"
-version = "0.1.0"
-description = "One-shot connectivity triage (DNS, ping, TCP, TLS-expiry, HTTP) for a host or service."
+version = "0.2.0"
+description = "Connectivity triage (DNS, ping, TCP, TLS-expiry, HTTP) for one or more hosts, with concurrency and JSON output."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

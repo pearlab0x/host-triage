@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import socket
 from datetime import UTC, datetime
 
 import pytest
@@ -15,6 +16,8 @@ from host_triage.checks import (
 )
 from host_triage.models import Status
 from host_triage.target import parse_target
+
+_AddrInfo = tuple[int, int, int, str, tuple[str, int]]
 
 
 @pytest.mark.parametrize(
@@ -71,14 +74,14 @@ def test_resolve_checks_rejects_unknown() -> None:
 
 
 def test_check_dns_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_getaddrinfo(host: str, port: int, **_: object) -> list:
+    def fake_getaddrinfo(host: str, port: int, **_: object) -> list[_AddrInfo]:
         return [
             (0, 0, 0, "", ("93.184.216.34", 443)),
             (0, 0, 0, "", ("93.184.216.34", 443)),  # duplicate is de-duped
             (0, 0, 0, "", ("2606:2800:220:1:248:1893:25c8:1946", 443)),
         ]
 
-    monkeypatch.setattr(checks.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
     result = checks.check_dns(parse_target("example.com"), checks.CheckConfig())
     assert result.status is Status.OK
     assert result.details["addresses"] == [
@@ -88,11 +91,9 @@ def test_check_dns_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_check_dns_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    import socket as _socket
+    def boom(*_: object, **__: object) -> list[_AddrInfo]:
+        raise socket.gaierror(-2, "Name or service not known")
 
-    def boom(*_: object, **__: object) -> list:
-        raise _socket.gaierror(-2, "Name or service not known")
-
-    monkeypatch.setattr(checks.socket, "getaddrinfo", boom)
+    monkeypatch.setattr(socket, "getaddrinfo", boom)
     result = checks.check_dns(parse_target("nope.invalid"), checks.CheckConfig())
     assert result.status is Status.FAIL

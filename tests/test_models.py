@@ -10,7 +10,13 @@ def test_status_severity_order() -> None:
 def test_check_result_to_dict_includes_duration() -> None:
     r = CheckResult("dns", Status.OK, "ok", details={"a": 1}, duration_ms=12.345)
     d = r.to_dict()
-    assert d == {"name": "dns", "status": "ok", "summary": "ok", "details": {"a": 1}, "duration_ms": 12.35}
+    assert d == {
+        "name": "dns",
+        "status": "ok",
+        "summary": "ok",
+        "details": {"a": 1},
+        "duration_ms": 12.35,
+    }
 
 
 def test_check_result_to_dict_omits_duration_when_none() -> None:

@@ -14,7 +14,7 @@ _SYMBOL: dict[Status, str] = {
 }
 
 _COLOR: dict[Status, str] = {
-    Status.OK: "\033[32m",   # green
+    Status.OK: "\033[32m",  # green
     Status.WARN: "\033[33m",  # yellow
     Status.FAIL: "\033[31m",  # red
     Status.SKIP: "\033[90m",  # grey
@@ -28,6 +28,28 @@ _TIMING_COLUMN = 66
 
 def render_json(report: Report) -> str:
     return json.dumps(report.to_dict(), indent=2)
+
+
+def render_json_multi(reports: list[Report]) -> str:
+    """JSON for a batch. A single target keeps the flat 0.1.0 shape."""
+    if len(reports) == 1:
+        return render_json(reports[0])
+    payload = {
+        "ok": all(r.ok for r in reports),
+        "failures": sum(1 for r in reports if not r.ok),
+        "targets": [r.to_dict() for r in reports],
+    }
+    return json.dumps(payload, indent=2)
+
+
+def render_text_multi(reports: list[Report], *, color: bool = True) -> str:
+    """Stacked per-target sections, with a summary footer when there's more than one."""
+    if len(reports) == 1:
+        return render_text(reports[0], color=color)
+    sections = [render_text(r, color=color) for r in reports]
+    failed = sum(1 for r in reports if not r.ok)
+    footer = _style(f"summary: {len(reports)} target(s) checked, {failed} failed", _BOLD, color)
+    return "\n\n".join(sections) + "\n\n" + footer
 
 
 def render_text(report: Report, *, color: bool = True) -> str:
