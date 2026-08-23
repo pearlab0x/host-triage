@@ -363,6 +363,139 @@ def count_trace_hops(output: str) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# spf (TXT lookup; shells out to dig, which handles resolver config and TCP)
+# --------------------------------------------------------------------------- #
+def check_spf(target: Target, cfg: CheckConfig) -> CheckResult:
+    binary = shutil.which("dig")
+    if binary is None:
+        return CheckResult("spf", Status.SKIP, "dig not found on PATH (needed for TXT lookup)")
+    argv = [binary, "+short", f"+time={max(1, int(cfg.timeout))}", "+tries=1", "TXT", target.host]
+    with _Timer() as t:
+        try:
+            proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                argv, capture_output=True, text=True, timeout=cfg.timeout + 2
+            )
+        except subprocess.TimeoutExpired:
+            return CheckResult("spf", Status.FAIL, "TXT lookup timed out", duration_ms=t.elapsed_ms)
+
+    txt_records = extract_txt_records(proc.stdout)
+    spf_records = [r for r in txt_records if r.lower().startswith("v=spf1")]
+
+    if not spf_records:
+        return CheckResult(
+            "spf",
+            Status.WARN,
+            "no SPF record found",
+            details={"txt_records": len(txt_records)},
+            duration_ms=t.elapsed_ms,
+        )
+    if len(spf_records) > 1:
+        return CheckResult(
+            "spf",
+            Status.WARN,
+            f"multiple SPF records found ({len(spf_records)}); RFC 7208 permits only one",
+            details={"records": spf_records},
+            duration_ms=t.elapsed_ms,
+        )
+
+    record = spf_records[0]
+    info = parse_spf(record)
+    return CheckResult(
+        "spf",
+        Status.OK,
+        spf_summary(info),
+        details={"record": record, **info},
+        duration_ms=t.elapsed_ms,
+    )
+
+
+def extract_txt_records(output: str) -> list[str]:
+    """Turn ``dig +short TXT`` output into a list of full TXT strings.
+
+    Each line may hold one record split into several quoted segments; per RFC
+    those segments are concatenated with no separator. Lines without quotes
+    (e.g. a chased CNAME target) are ignored.
+    """
+    records: list[str] = []
+    for line in output.splitlines():
+        segments = re.findall(r'"((?:[^"\\]|\\.)*)"', line)
+        if segments:
+            records.append("".join(segments))
+    return records
+
+
+def parse_spf(record: str) -> dict[str, object]:
+    """Break an SPF record into its mechanisms and modifiers."""
+    includes: list[str] = []
+    ip4: list[str] = []
+    ip6: list[str] = []
+    a: list[str] = []
+    mx: list[str] = []
+    exists: list[str] = []
+    other: list[str] = []
+    redirect: str | None = None
+    all_qualifier: str | None = None
+
+    for token in record.split()[1:]:  # skip the leading "v=spf1"
+        mech = token
+        qualifier = "+"
+        if mech[:1] in "+-~?":
+            qualifier, mech = mech[0], mech[1:]
+        low = mech.lower()
+        if low == "all":
+            all_qualifier = qualifier + "all"
+        elif low.startswith("include:"):
+            includes.append(mech.split(":", 1)[1])
+        elif low.startswith("ip4:"):
+            ip4.append(mech.split(":", 1)[1])
+        elif low.startswith("ip6:"):
+            ip6.append(mech.split(":", 1)[1])
+        elif low == "a" or low.startswith(("a:", "a/")):
+            a.append(mech)
+        elif low == "mx" or low.startswith(("mx:", "mx/")):
+            mx.append(mech)
+        elif low.startswith("exists:"):
+            exists.append(mech.split(":", 1)[1])
+        elif low.startswith("redirect="):
+            redirect = mech.split("=", 1)[1]
+        else:
+            other.append(mech)
+
+    return {
+        "includes": includes,
+        "ip4": ip4,
+        "ip6": ip6,
+        "a": a,
+        "mx": mx,
+        "exists": exists,
+        "redirect": redirect,
+        "all": all_qualifier,
+        "other": other,
+    }
+
+
+def spf_summary(info: dict[str, object]) -> str:
+    parts: list[str] = []
+    for key, label in (
+        ("includes", "include"),
+        ("ip4", "ip4"),
+        ("ip6", "ip6"),
+        ("a", "a"),
+        ("mx", "mx"),
+        ("exists", "exists"),
+    ):
+        values = info[key]
+        if isinstance(values, list) and values:
+            parts.append(f"{len(values)} {label}")
+    if info["redirect"]:
+        parts.append(f"redirect={info['redirect']}")
+    summary = "SPF: " + (", ".join(parts) if parts else "no mechanisms")
+    if info["all"]:
+        summary += f" ({info['all']})"
+    return summary
+
+
+# --------------------------------------------------------------------------- #
 # registry
 # --------------------------------------------------------------------------- #
 REGISTRY: dict[str, Check] = {
@@ -372,6 +505,7 @@ REGISTRY: dict[str, Check] = {
     "tls": check_tls,
     "http": check_http,
     "trace": check_trace,
+    "spf": check_spf,
 }
 
 DEFAULT_CHECKS: tuple[str, ...] = ("dns", "ping", "tcp", "tls", "http")

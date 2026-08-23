@@ -5,7 +5,7 @@
 [![Ruff](https://img.shields.io/badge/lint-ruff-261230.svg)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-One command to answer *"is this host actually up, and if not, where does it break?"*
+One command to answer _"is this host actually up, and if not, where does it break?"_
 
 `host-triage` runs the checks you'd otherwise run by hand - DNS resolution,
 ping, a TCP connect, TLS certificate expiry, and an HTTP request - against one
@@ -59,8 +59,10 @@ host-triage https://api.example.com:8443    # scheme and port taken from the URL
 host-triage db.internal -c dns,tcp -p 5432  # only some checks, explicit port
 host-triage example.com --trace             # add traceroute (slow, off by default)
 host-triage example.com -a                  # every check
-host-triage example.com --json | jq .       # machine-readable
+host-triage example.com --json | jq .       # machine-readable (needs jq)
 host-triage example.com -t 2                 # 2-second per-check timeout
+host-triage example.com --spf                # also resolve the SPF record
+host-triage example.com -c spf --json | jq .details   # just the SPF, structured (needs jq)
 ```
 
 ### Multiple targets
@@ -75,7 +77,7 @@ host-triage -f prod.txt -f staging.txt -j 20   # multiple files, 20 workers
 ```
 
 Results are always printed in the order the targets were given, regardless of
-which finishes first, and the run exits non-zero if *any* target has a failure.
+which finishes first, and the run exits non-zero if _any_ target has a failure.
 A single unparseable target reports a failing `target` check instead of
 aborting the whole batch. Worker count is chosen automatically; override it with
 `-j/--jobs`.
@@ -91,14 +93,15 @@ example.com            example.com:8443       https://example.com/health
 
 ## Checks
 
-| Check   | What it verifies                                       | Notes                                   |
-| ------- | ------------------------------------------------------ | --------------------------------------- |
-| `dns`   | Hostname resolves to one or more A/AAAA records        |                                         |
-| `ping`  | ICMP reachability and average RTT                      | Shells out to the system `ping`         |
-| `tcp`   | A TCP connection to the port can be established        | Reports the peer IP and connect latency |
-| `tls`   | Certificate is valid and not expiring soon             | `WARN` within `--tls-warn-days` (21)    |
+| Check   | What it verifies                                       | Notes                                       |
+| ------- | ------------------------------------------------------ | ------------------------------------------- |
+| `dns`   | Hostname resolves to one or more A/AAAA records        |                                             |
+| `ping`  | ICMP reachability and average RTT                      | Shells out to the system `ping`             |
+| `tcp`   | A TCP connection to the port can be established        | Reports the peer IP and connect latency     |
+| `tls`   | Certificate is valid and not expiring soon             | `WARN` within `--tls-warn-days` (21)        |
 | `http`  | An HTTP(S) request returns a non-5xx status            | Follows redirects; `4xx` warns, `5xx` fails |
-| `trace` | Traceroute hop count to the host                       | Opt-in via `--trace`; can be slow       |
+| `trace` | Traceroute hop count to the host                       | Opt-in via `--trace`; can be slow           |
+| `spf`   | Looks up the domain's SPF (TXT) record and its origins | Opt-in via `--spf`; needs `dig` on PATH     |
 
 Statuses are `OK`, `WARN`, `FAIL`, and `--` (skipped, e.g. `tls` on a plain
 `http://` target).
@@ -144,12 +147,12 @@ targets it's wrapped so you can gate on the batch as a whole:
 
 ## Exit codes
 
-| Code | Meaning                                            |
-| ---- | -------------------------------------------------- |
-| `0`  | All checks clear on every target (warnings pass)   |
-| `1`  | One or more checks failed on one or more targets   |
-| `2`  | Usage error                                        |
-| `3`  | Unexpected error                                   |
+| Code | Meaning                                          |
+| ---- | ------------------------------------------------ |
+| `0`  | All checks clear on every target (warnings pass) |
+| `1`  | One or more checks failed on one or more targets |
+| `2`  | Usage error                                      |
+| `3`  | Unexpected error                                 |
 
 Because a warning (e.g. a cert with 9 days left) does **not** fail the run, you
 can wire it into CI and only break the build on a real outage:

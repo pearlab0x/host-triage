@@ -53,6 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--trace", action="store_true", help="also run traceroute (slow; off by default)"
     )
+    parser.add_argument(
+        "--spf", action="store_true", help="also look up the domain's SPF (TXT) record"
+    )
     parser.add_argument("-a", "--all", action="store_true", help="run every available check")
     parser.add_argument("-p", "--port", type=int, help="override the port for every target")
     parser.add_argument(
@@ -89,6 +92,8 @@ def _select_checks(args: argparse.Namespace) -> list[str]:
     names = [c.strip() for c in args.checks.split(",") if c.strip()]
     if args.trace and "trace" not in names:
         names.append("trace")
+    if args.spf and "spf" not in names:
+        names.append("spf")
     return resolve_checks(names)
 
 

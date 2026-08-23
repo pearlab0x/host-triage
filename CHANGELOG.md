@@ -4,9 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-23
+
+### Added
+
+- `spf` check (opt-in via `--spf` or `-c spf`): looks up the domain's TXT
+  records, finds the `v=spf1` record, and reports its parsed mechanisms
+  (`include:`, `ip4:`, `ip6:`, `a`, `mx`, `exists:`, `redirect=`, and the
+  `all` qualifier) in the summary and JSON details. Useful for surfacing the
+  real origins behind a CDN. Requires `dig` on PATH; skips gracefully without
+  it, warns when no SPF record exists or when more than one is present.
+
 ## [0.2.0] - 2026-08-23
 
 ### Added
+
 - Multiple targets in one run, passed as arguments, via `-f/--file` (repeatable),
   or on stdin (`-`); files support `#` comments and blank lines.
 - Concurrent execution across targets with `-j/--jobs` (auto by default);
@@ -16,6 +28,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `-p/--port` now applies to every target.
 
 ### Changed
+
 - A single, unparseable target no longer aborts the run; it reports a failing
   `target` check instead.
 - Exit code reflects the worst result across all targets.
@@ -23,6 +36,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.1.0] - 2026-08-22
 
 ### Added
+
 - Initial release.
 - Checks: `dns`, `ping`, `tcp`, `tls` (expiry), `http`, `trace` (opt-in).
 - Human-readable table and `--json` output.
