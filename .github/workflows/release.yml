@@ -75,10 +75,24 @@ jobs:
           name: dist
           path: dist/
       - name: Extract this version's changelog section
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
           set -euo pipefail
-          awk '/^## \[/{ if (seen) exit; seen=1; next } seen' CHANGELOG.md > notes.md
-          if [ ! -s notes.md ]; then echo "See CHANGELOG.md." > notes.md; fi
+          # Match the heading for THIS version rather than whichever section is
+          # first, so an "Unreleased" heading can never become the release notes.
+          awk -v want="## [$VERSION]" '
+            index($0, want) == 1 { seen = 1; next }
+            seen && /^## \[/     { exit }
+            seen                 { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            # Don't fail: the package is already on PyPI by this point, so a
+            # missing section should not cost us the GitHub Release too.
+            echo "::warning::no changelog section for $VERSION; linking instead"
+            printf 'See [CHANGELOG.md](https://github.com/%s/blob/%s/CHANGELOG.md).\n' \
+              "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" > notes.md
+          fi
       - name: Create the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

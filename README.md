@@ -1,5 +1,6 @@
 # host-triage
 
+[![PyPI](https://img.shields.io/pypi/v/host-triage)](https://pypi.org/project/host-triage/)
 [![CI](https://github.com/pearlab0x/host-triage/actions/workflows/ci.yml/badge.svg)](https://github.com/pearlab0x/host-triage/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![Ruff](https://img.shields.io/badge/lint-ruff-261230.svg)](https://github.com/astral-sh/ruff)
