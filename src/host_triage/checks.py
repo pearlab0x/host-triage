@@ -496,6 +496,116 @@ def spf_summary(info: dict[str, object]) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# dmarc (TXT lookup at _dmarc.<domain>; sibling of the spf check)
+# --------------------------------------------------------------------------- #
+def check_dmarc(target: Target, cfg: CheckConfig) -> CheckResult:
+    binary = shutil.which("dig")
+    if binary is None:
+        return CheckResult("dmarc", Status.SKIP, "dig not found on PATH (needed for TXT lookup)")
+    name = f"_dmarc.{target.host}"
+    argv = [binary, "+short", f"+time={max(1, int(cfg.timeout))}", "+tries=1", "TXT", name]
+    with _Timer() as t:
+        try:
+            proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                argv, capture_output=True, text=True, timeout=cfg.timeout + 2
+            )
+        except subprocess.TimeoutExpired:
+            return CheckResult(
+                "dmarc", Status.FAIL, "TXT lookup timed out", duration_ms=t.elapsed_ms
+            )
+
+    txt_records = extract_txt_records(proc.stdout)
+    dmarc_records = [r for r in txt_records if r.lower().startswith("v=dmarc1")]
+
+    if not dmarc_records:
+        return CheckResult(
+            "dmarc",
+            Status.WARN,
+            f"no DMARC record found at {name}",
+            details={"queried": name},
+            duration_ms=t.elapsed_ms,
+        )
+    if len(dmarc_records) > 1:
+        return CheckResult(
+            "dmarc",
+            Status.WARN,
+            f"multiple DMARC records found ({len(dmarc_records)}); RFC 7489 permits only one",
+            details={"queried": name, "records": dmarc_records},
+            duration_ms=t.elapsed_ms,
+        )
+
+    record = dmarc_records[0]
+    info = parse_dmarc(record)
+    return CheckResult(
+        "dmarc",
+        classify_dmarc(info),
+        dmarc_summary(info),
+        details={"queried": name, "record": record, **info},
+        duration_ms=t.elapsed_ms,
+    )
+
+
+_DMARC_URI_TAGS = ("rua", "ruf")
+
+
+def parse_dmarc(record: str) -> dict[str, object]:
+    """Break a DMARC record into its tags.
+
+    Tags are ``;``-separated ``key=value`` pairs. ``rua``/``ruf`` hold
+    comma-separated URI lists; ``pct``/``ri`` are numeric. Keys are
+    case-insensitive per RFC 7489, values are kept as written.
+    """
+    tags: dict[str, object] = {}
+    for chunk in record.split(";"):
+        key, sep, value = chunk.partition("=")
+        key = key.strip().lower()
+        if not sep or not key or key == "v":
+            continue
+        value = value.strip()
+        if key in _DMARC_URI_TAGS:
+            tags[key] = [uri.strip() for uri in value.split(",") if uri.strip()]
+        elif key in ("pct", "ri"):
+            try:
+                tags[key] = int(value)
+            except ValueError:
+                tags[key] = value
+        else:
+            tags[key] = value.lower() if key in ("p", "sp", "adkim", "aspf") else value
+    return tags
+
+
+def classify_dmarc(info: dict[str, object]) -> Status:
+    """A record that does not actually enforce anything is a warning, not a pass."""
+    policy = info.get("p")
+    if policy not in ("quarantine", "reject"):
+        return Status.WARN
+    pct = info.get("pct")
+    if isinstance(pct, int) and pct < 100:
+        return Status.WARN
+    return Status.OK
+
+
+def dmarc_summary(info: dict[str, object]) -> str:
+    policy = info.get("p")
+    if not policy:
+        return "DMARC record present but has no policy (p=) tag"
+    if policy == "none":
+        parts = ["policy p=none (monitor only, nothing enforced)"]
+    else:
+        parts = [f"policy p={policy}"]
+    if info.get("sp"):
+        parts.append(f"sp={info['sp']}")
+    pct = info.get("pct")
+    if isinstance(pct, int) and pct < 100:
+        parts.append(f"pct={pct} (applied to {pct}% of mail)")
+    for tag in _DMARC_URI_TAGS:
+        uris = info.get(tag)
+        if isinstance(uris, list) and uris:
+            parts.append(f"{len(uris)} {tag}")
+    return "DMARC: " + ", ".join(parts)
+
+
+# --------------------------------------------------------------------------- #
 # registry
 # --------------------------------------------------------------------------- #
 REGISTRY: dict[str, Check] = {
@@ -506,6 +616,7 @@ REGISTRY: dict[str, Check] = {
     "http": check_http,
     "trace": check_trace,
     "spf": check_spf,
+    "dmarc": check_dmarc,
 }
 
 DEFAULT_CHECKS: tuple[str, ...] = ("dns", "ping", "tcp", "tls", "http")

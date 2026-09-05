@@ -60,6 +60,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--spf", action="store_true", help="also look up the domain's SPF (TXT) record"
     )
+    parser.add_argument(
+        "--dmarc", action="store_true", help="also look up the domain's DMARC (TXT) record"
+    )
     parser.add_argument("-a", "--all", action="store_true", help="run every available check")
     parser.add_argument("-p", "--port", type=int, help="override the port for every target")
     parser.add_argument(
@@ -100,10 +103,13 @@ def _select_checks(args: argparse.Namespace) -> list[str]:
     if args.all:
         return list(REGISTRY)
     names = [c.strip() for c in args.checks.split(",") if c.strip()]
-    if args.trace and "trace" not in names:
-        names.append("trace")
-    if args.spf and "spf" not in names:
-        names.append("spf")
+    for flag, name in (
+        (args.trace, "trace"),
+        (args.spf, "spf"),
+        (args.dmarc, "dmarc"),
+    ):
+        if flag and name not in names:
+            names.append(name)
     return resolve_checks(names)
 
 
