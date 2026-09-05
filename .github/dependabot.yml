@@ -1,0 +1,25 @@
+version: 2
+
+updates:
+  # Actions are SHA-pinned in the workflows, so this is the only thing that
+  # moves them - without it the pins silently rot.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Runtime deps are empty by design; this tracks the dev toolchain only.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "build"
+    groups:
+      dev-tooling:
+        patterns: ["*"]
