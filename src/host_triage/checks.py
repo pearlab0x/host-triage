@@ -18,7 +18,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from .models import CheckResult, Status
@@ -606,6 +606,134 @@ def dmarc_summary(info: dict[str, object]) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# security headers
+# --------------------------------------------------------------------------- #
+#: (header name, short label, whether it only makes sense over TLS)
+SECURITY_HEADERS: tuple[tuple[str, str, bool], ...] = (
+    ("strict-transport-security", "HSTS", True),
+    ("content-security-policy", "CSP", False),
+    ("x-content-type-options", "X-Content-Type-Options", False),
+    ("x-frame-options", "X-Frame-Options", False),
+    ("referrer-policy", "Referrer-Policy", False),
+)
+
+#: RFC-recommended HSTS floor: six months, in seconds.
+HSTS_MIN_MAX_AGE = 15_552_000
+
+
+def check_headers(target: Target, cfg: CheckConfig) -> CheckResult:
+    url = target.url
+    if not url.startswith(("http://", "https://")):
+        return CheckResult("headers", Status.SKIP, f"unsupported scheme for {url}")
+    request = urllib.request.Request(  # noqa: S310 - scheme validated above
+        url, method=cfg.http_method, headers={"User-Agent": cfg.user_agent}
+    )
+    with _Timer() as t:
+        try:
+            with urllib.request.urlopen(request, timeout=cfg.timeout) as resp:  # noqa: S310
+                headers = dict(resp.headers.items())
+        except urllib.error.HTTPError as exc:
+            # An error response still carries the headers we want to audit.
+            headers = dict(exc.headers.items()) if exc.headers else {}
+        except urllib.error.URLError as exc:
+            return CheckResult(
+                "headers", Status.FAIL, f"request failed: {exc.reason}", duration_ms=t.elapsed_ms
+            )
+        except TimeoutError:
+            return CheckResult(
+                "headers", Status.FAIL, "request timed out", duration_ms=t.elapsed_ms
+            )
+    audit = audit_security_headers(headers, tls=url.startswith("https://"))
+    return CheckResult(
+        "headers",
+        audit.status,
+        audit.summary,
+        details=audit.to_details(),
+        duration_ms=t.elapsed_ms,
+    )
+
+
+@dataclass(slots=True)
+class HeaderAudit:
+    """What a response's security headers do and do not cover."""
+
+    present: list[str] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)
+    weak: list[str] = field(default_factory=list)
+
+    @property
+    def checked(self) -> int:
+        return len(self.present) + len(self.missing)
+
+    @property
+    def status(self) -> Status:
+        """Missing hardening is worth a warning; it is never an outage."""
+        return Status.WARN if (self.missing or self.weak) else Status.OK
+
+    @property
+    def summary(self) -> str:
+        summary = f"{len(self.present)} of {self.checked} security header(s) present"
+        if self.missing:
+            summary += f" (missing: {', '.join(self.missing)})"
+        if self.weak:
+            summary += f" ({'; '.join(self.weak)})"
+        return summary
+
+    def to_details(self) -> dict[str, object]:
+        return {
+            "present": self.present,
+            "missing": self.missing,
+            "weak": self.weak,
+            "checked": self.checked,
+        }
+
+
+def audit_security_headers(headers: dict[str, str], *, tls: bool) -> HeaderAudit:
+    """Sort the response headers into present, missing, and present-but-weak.
+
+    Over plain HTTP, HSTS is not applicable and is left out of both lists
+    rather than reported as missing.
+    """
+    lookup = {k.lower(): v for k, v in headers.items()}
+    audit = HeaderAudit()
+
+    for header, label, tls_only in SECURITY_HEADERS:
+        if tls_only and not tls:
+            continue
+        value = lookup.get(header)
+        if value is None:
+            audit.missing.append(label)
+            continue
+        audit.present.append(label)
+        note = _weak_header_note(header, label, value)
+        if note:
+            audit.weak.append(note)
+
+    return audit
+
+
+def _weak_header_note(header: str, label: str, value: str) -> str | None:
+    """Flag values that are present but do not deliver what the header promises."""
+    if header == "x-content-type-options" and value.strip().lower() != "nosniff":
+        return f"{label} is {value.strip()!r}, expected 'nosniff'"
+    if header == "strict-transport-security":
+        max_age = parse_hsts_max_age(value)
+        if max_age is None:
+            return f"{label} has no max-age directive"
+        if max_age < HSTS_MIN_MAX_AGE:
+            return f"{label} max-age={max_age} is below the recommended {HSTS_MIN_MAX_AGE}"
+    return None
+
+
+_HSTS_MAX_AGE = re.compile(r"max-age\s*=\s*\"?(\d+)\"?", re.IGNORECASE)
+
+
+def parse_hsts_max_age(value: str) -> int | None:
+    match = _HSTS_MAX_AGE.search(value)
+    return int(match.group(1)) if match else None
+
+
+# --------------------------------------------------------------------------- #
 # registry
 # --------------------------------------------------------------------------- #
 REGISTRY: dict[str, Check] = {
@@ -614,6 +742,7 @@ REGISTRY: dict[str, Check] = {
     "tcp": check_tcp,
     "tls": check_tls,
     "http": check_http,
+    "headers": check_headers,
     "trace": check_trace,
     "spf": check_spf,
     "dmarc": check_dmarc,
