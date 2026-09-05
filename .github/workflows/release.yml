@@ -2,6 +2,7 @@ name: Release
 
 # Tag-driven: `git tag v0.4.0 && git push --tags` builds, verifies the tag
 # matches the packaged version, publishes to PyPI, then cuts a GitHub Release.
+# Running it manually (workflow_dispatch) builds only - nothing is published.
 on:
   push:
     tags: ["v*"]
@@ -43,6 +44,9 @@ jobs:
 
   publish:
     needs: build
+    # Only a real tag publishes. A manual run stops after `build`, making
+    # workflow_dispatch a dry run that exercises the build without shipping.
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     # Trusted Publishing: no API token needed, but the PyPI project must have
     # this repo + workflow + environment registered as a trusted publisher.
