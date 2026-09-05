@@ -4,6 +4,45 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-06
+
+### Added
+
+- `--fail-on {fail,warn}`: choose the severity that exits non-zero. The default
+  (`fail`) is unchanged; `--fail-on warn` also gates on warnings, so an
+  expiring certificate or a `4xx` can break a build instead of passing quietly.
+  Skipped checks never trip the gate.
+- `headers` check (opt-in via `--headers` or `-c headers`): audits the HTTP
+  response for HSTS, CSP, `X-Content-Type-Options`, `X-Frame-Options`, and
+  `Referrer-Policy`. Reports which are missing, and flags headers that are
+  present but ineffective (HSTS `max-age` below six months, a
+  `X-Content-Type-Options` that isn't `nosniff`). HSTS is not counted over
+  plain `http://`, and error responses are still audited.
+- `dmarc` check (opt-in via `--dmarc` or `-c dmarc`): resolves
+  `_dmarc.<domain>` and parses the policy tags (`p`, `sp`, `rua`, `ruf`,
+  `pct`, …). Warns on a missing record, more than one record, a record with no
+  policy, `p=none`, or a `pct` below 100, since none of those enforce anything.
+  Requires `dig` on PATH; skips gracefully without it.
+- `-w/--watch [SECONDS]`: re-run continuously, redrawing in place (default 5s,
+  ctrl-c to stop). With `--json` or when piped, it streams one document per
+  cycle instead of clearing the screen. The exit code is that of the last pass.
+
+### Changed
+
+- The failure count in the output header and in batch JSON now follows
+  `--fail-on`, so what's printed always matches the exit code.
+
+### CI/CD
+
+- Actions are pinned to commit SHAs, with Dependabot configured to move both
+  the pins and the dev toolchain weekly.
+- CI caches pip downloads, enforces an 80% coverage floor, and gained a `build`
+  job that builds the sdist/wheel, runs `twine check --strict`, and smoke-tests
+  the installed wheel.
+- New tag-driven release workflow: verifies the tag matches the packaged
+  version, publishes to PyPI via Trusted Publishing (no stored token), and cuts
+  a GitHub Release with notes taken from this changelog.
+
 ## [0.3.0] - 2026-08-23
 
 ### Added
