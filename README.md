@@ -42,6 +42,12 @@ output.
 
 ```bash
 # with pipx (recommended for a CLI)
+pipx install host-triage
+
+# or with pip
+pip install host-triage
+
+# latest unreleased code
 pipx install git+https://github.com/pearlab0x/host-triage
 
 # or from a clone
