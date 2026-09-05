@@ -25,6 +25,9 @@ _GREY = "\033[90m"
 
 _TIMING_COLUMN = 66
 
+#: Cursor home, erase screen, erase scrollback - used to redraw in watch mode.
+CLEAR_SCREEN = "\033[H\033[2J\033[3J"
+
 
 def render_json(report: Report, threshold: Status = Status.FAIL) -> str:
     return json.dumps(report.to_dict(threshold), indent=2)

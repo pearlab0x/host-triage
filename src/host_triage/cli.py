@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 
 from . import __version__
 from .checks import DEFAULT_CHECKS, REGISTRY, CheckConfig, resolve_checks
 from .models import Report, Status
-from .render import render_json_multi, render_text_multi
+from .render import CLEAR_SCREEN, render_json_multi, render_text_multi
 from .runner import auto_jobs, run_many
 from .sources import gather_targets
 
@@ -21,6 +23,8 @@ EXIT_ERROR = 3
 
 #: --fail-on values, mapped to the severity that trips a non-zero exit.
 FAIL_ON: dict[str, Status] = {"fail": Status.FAIL, "warn": Status.WARN}
+
+DEFAULT_WATCH_INTERVAL = 5.0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -90,6 +94,15 @@ def build_parser() -> argparse.ArgumentParser:
         default="fail",
         help="minimum severity that exits non-zero (default: fail; 'warn' also gates on warnings)",
     )
+    parser.add_argument(
+        "-w",
+        "--watch",
+        type=float,
+        nargs="?",
+        const=DEFAULT_WATCH_INTERVAL,
+        metavar="SECONDS",
+        help=f"re-run every SECONDS (default: {DEFAULT_WATCH_INTERVAL:g}); ctrl-c to stop",
+    )
     parser.add_argument("--json", action="store_true", help="emit JSON instead of a table")
     parser.add_argument("--no-color", action="store_true", help="disable coloured output")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -146,6 +159,35 @@ def _exit_code(reports: list[Report], threshold: Status) -> int:
     return EXIT_OK if all(r.passes(threshold) for r in reports) else EXIT_FAILURES
 
 
+def _watch(
+    targets: list[str],
+    check_names: list[str],
+    cfg: CheckConfig,
+    args: argparse.Namespace,
+    threshold: Status,
+) -> int:
+    """Re-run until interrupted, returning the exit code of the last full pass."""
+    jobs = auto_jobs(len(targets), args.jobs)
+    redraw = not args.json and sys.stdout.isatty()
+    code = EXIT_OK
+    try:
+        while True:
+            reports = run_many(targets, check_names, cfg, jobs=jobs, port=args.port)
+            code = _exit_code(reports, threshold)
+            if redraw:
+                print(CLEAR_SCREEN, end="")
+            print(_render(reports, args, threshold))
+            if redraw:
+                stamp = datetime.now().astimezone().strftime("%H:%M:%S")
+                print(f"\nwatching every {args.watch:g}s - last run {stamp} - ctrl-c to stop")
+            sys.stdout.flush()
+            time.sleep(args.watch)
+    except KeyboardInterrupt:
+        if redraw:
+            print()  # leave the shell prompt on a clean line after ^C
+        return code
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -160,9 +202,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if not targets:
         parser.error("no targets given (pass them as arguments, via -f FILE, or on stdin)")
+    if args.watch is not None and args.watch <= 0:
+        parser.error("--watch interval must be greater than 0")
 
     cfg = CheckConfig(timeout=args.timeout, tls_warn_days=args.tls_warn_days)
     threshold = FAIL_ON[args.fail_on]
+
+    if args.watch is not None:
+        return _watch(targets, check_names, cfg, args, threshold)
 
     jobs = auto_jobs(len(targets), args.jobs)
     reports = run_many(targets, check_names, cfg, jobs=jobs, port=args.port)
