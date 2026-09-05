@@ -78,10 +78,22 @@ class Report:
     def failures(self) -> int:
         return sum(1 for r in self.results if r.status.is_failure)
 
-    def to_dict(self) -> dict[str, object]:
+    def breaches(self, threshold: Status = Status.FAIL) -> int:
+        """How many checks are at least as severe as ``threshold``.
+
+        ``SKIP`` sorts below ``WARN``, so a skipped check never counts as a
+        breach even under ``--fail-on warn``.
+        """
+        return sum(1 for r in self.results if r.status.severity >= threshold.severity)
+
+    def passes(self, threshold: Status = Status.FAIL) -> bool:
+        """True when nothing reached ``threshold``. The default is today's rule."""
+        return self.breaches(threshold) == 0
+
+    def to_dict(self, threshold: Status = Status.FAIL) -> dict[str, object]:
         return {
             "target": self.target,
-            "ok": self.ok,
+            "ok": self.passes(threshold),
             "worst": self.worst.value,
             "checks": [r.to_dict() for r in self.results],
         }

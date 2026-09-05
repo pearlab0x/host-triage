@@ -26,37 +26,42 @@ _GREY = "\033[90m"
 _TIMING_COLUMN = 66
 
 
-def render_json(report: Report) -> str:
-    return json.dumps(report.to_dict(), indent=2)
+def render_json(report: Report, threshold: Status = Status.FAIL) -> str:
+    return json.dumps(report.to_dict(threshold), indent=2)
 
 
-def render_json_multi(reports: list[Report]) -> str:
+def render_json_multi(reports: list[Report], threshold: Status = Status.FAIL) -> str:
     """JSON for a batch. A single target keeps the flat 0.1.0 shape."""
     if len(reports) == 1:
-        return render_json(reports[0])
+        return render_json(reports[0], threshold)
     payload = {
-        "ok": all(r.ok for r in reports),
-        "failures": sum(1 for r in reports if not r.ok),
-        "targets": [r.to_dict() for r in reports],
+        "ok": all(r.passes(threshold) for r in reports),
+        "failures": sum(1 for r in reports if not r.passes(threshold)),
+        "targets": [r.to_dict(threshold) for r in reports],
     }
     return json.dumps(payload, indent=2)
 
 
-def render_text_multi(reports: list[Report], *, color: bool = True) -> str:
+def render_text_multi(
+    reports: list[Report], *, color: bool = True, threshold: Status = Status.FAIL
+) -> str:
     """Stacked per-target sections, with a summary footer when there's more than one."""
     if len(reports) == 1:
-        return render_text(reports[0], color=color)
-    sections = [render_text(r, color=color) for r in reports]
-    failed = sum(1 for r in reports if not r.ok)
+        return render_text(reports[0], color=color, threshold=threshold)
+    sections = [render_text(r, color=color, threshold=threshold) for r in reports]
+    failed = sum(1 for r in reports if not r.passes(threshold))
     footer = _style(f"summary: {len(reports)} target(s) checked, {failed} failed", _BOLD, color)
     return "\n\n".join(sections) + "\n\n" + footer
 
 
-def render_text(report: Report, *, color: bool = True) -> str:
+def render_text(report: Report, *, color: bool = True, threshold: Status = Status.FAIL) -> str:
     lines: list[str] = []
     header = f"host-triage  {report.target}"
-    if report.failures:
-        header += f"  ({report.failures} check(s) failed)"
+    breaches = report.breaches(threshold)
+    if breaches:
+        # Name what actually broke the gate, so the count matches the exit code.
+        verb = "failed" if threshold is Status.FAIL else f"at or above {threshold.value}"
+        header += f"  ({breaches} check(s) {verb})"
     lines.append(_style(header, _BOLD, color))
     lines.append("")
 

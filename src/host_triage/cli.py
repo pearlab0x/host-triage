@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import __version__
 from .checks import DEFAULT_CHECKS, REGISTRY, CheckConfig, resolve_checks
+from .models import Report, Status
 from .render import render_json_multi, render_text_multi
 from .runner import auto_jobs, run_many
 from .sources import gather_targets
@@ -17,6 +18,9 @@ EXIT_OK = 0
 EXIT_FAILURES = 1
 EXIT_USAGE = 2
 EXIT_ERROR = 3
+
+#: --fail-on values, mapped to the severity that trips a non-zero exit.
+FAIL_ON: dict[str, Status] = {"fail": Status.FAIL, "warn": Status.WARN}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -74,6 +78,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=21,
         help="warn when a certificate expires within this many days (default: 21)",
     )
+    parser.add_argument(
+        "--fail-on",
+        choices=tuple(FAIL_ON),
+        default="fail",
+        help="minimum severity that exits non-zero (default: fail; 'warn' also gates on warnings)",
+    )
     parser.add_argument("--json", action="store_true", help="emit JSON instead of a table")
     parser.add_argument("--no-color", action="store_true", help="disable coloured output")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -116,6 +126,16 @@ def _resolve_targets(args: argparse.Namespace) -> list[str]:
     return gather_targets(positionals, file_texts, stdin_text)
 
 
+def _render(reports: list[Report], args: argparse.Namespace, threshold: Status) -> str:
+    if args.json:
+        return render_json_multi(reports, threshold)
+    return render_text_multi(reports, color=_use_color(args), threshold=threshold)
+
+
+def _exit_code(reports: list[Report], threshold: Status) -> int:
+    return EXIT_OK if all(r.passes(threshold) for r in reports) else EXIT_FAILURES
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -132,15 +152,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("no targets given (pass them as arguments, via -f FILE, or on stdin)")
 
     cfg = CheckConfig(timeout=args.timeout, tls_warn_days=args.tls_warn_days)
+    threshold = FAIL_ON[args.fail_on]
+
     jobs = auto_jobs(len(targets), args.jobs)
     reports = run_many(targets, check_names, cfg, jobs=jobs, port=args.port)
-
-    if args.json:
-        print(render_json_multi(reports))
-    else:
-        print(render_text_multi(reports, color=_use_color(args)))
-
-    return EXIT_OK if all(r.ok for r in reports) else EXIT_FAILURES
+    print(_render(reports, args, threshold))
+    return _exit_code(reports, threshold)
 
 
 if __name__ == "__main__":
